@@ -15,6 +15,7 @@ import com.google.ar.core.ArCoreApk;
 import com.google.ar.core.Config;
 import com.google.ar.core.Frame;
 import com.google.ar.core.Pose;
+import com.google.ar.core.PointCloud;
 import com.google.ar.core.Session;
 import com.google.ar.core.TrackingState;
 import com.google.ar.core.exceptions.UnavailableDeviceNotCompatibleException;
@@ -104,7 +105,7 @@ public class MainActivity extends AppCompatActivity {
                 try {
                     rgb = frame.acquireCameraImage();
                     keyframes.add(System.currentTimeMillis(), pose7, rgb.getWidth(), rgb.getHeight(), 1.0f);
-                    if (depthSupported) captureDepth(frame, rgb, pose);
+                    // ARCore tracking itself exposes sparse visual-feature points even on phones\n                    // without the Depth API. This is our real no-ToF/no-LiDAR fallback.\n                    captureTrackingPoints(frame);\n                    if (depthSupported) captureDepth(frame, rgb, pose);
                 } finally {
                     if (rgb != null) rgb.close();
                 }
@@ -117,6 +118,23 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception ignored) {
                 // Camera/depth frames are asynchronous; transient NotYetAvailable is expected.
             }
+        }
+    }
+
+    private void captureTrackingPoints(Frame frame) {
+        try (PointCloud pc = frame.acquirePointCloud()) {
+            java.nio.FloatBuffer pts = pc.getPoints();
+            // ARCore point cloud layout is X,Y,Z,confidence in world coordinates.
+            for (int i = 0; i + 3 < pts.limit(); i += 4) {
+                float x = pts.get(i);
+                float y = pts.get(i + 1);
+                float z = pts.get(i + 2);
+                float confidence = pts.get(i + 3);
+                if (confidence < 0.12f) continue;
+                scannerView.cloud().add(x, y, z, 235, 245, 255, confidence);
+            }
+        } catch (Exception ignored) {
+            // Point clouds can be temporarily unavailable while tracking initializes.
         }
     }
 
