@@ -1,0 +1,3 @@
+package com.naang360.redmi3dscanner;
+import java.io.*;import java.util.*;
+public final class PointCloud {public static final class P{public final float x,y,z;P(float a,float b,float c){x=a;y=b;z=c;}}private final List<P> p=new ArrayList<>();private final int max;public PointCloud(int m){max=m;}public synchronized void add(float x,float y,float z){if(p.size()<max)p.add(new P(x,y,z));}public synchronized int size(){return p.size();}public synchronized void writePly(File f)throws Exception{try(BufferedWriter w=new BufferedWriter(new FileWriter(f))){w.write("ply\nformat ascii 1.0\nelement vertex "+p.size()+"\nproperty float x\nproperty float y\nproperty float z\nend_header\n");for(P q:p)w.write(q.x+" "+q.y+" "+q.z+"\n");}}}
