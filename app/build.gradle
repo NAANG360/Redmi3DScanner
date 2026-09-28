@@ -2,6 +2,19 @@ plugins { id 'com.android.application' }
 
 android { namespace 'com.naang360.redmi3dscanner'; compileSdk 35
  defaultConfig { applicationId 'com.naang360.redmi3dscanner'; minSdk 29; targetSdk 35; versionCode 1; versionName '0.1.0' }
- compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+ compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion_17 }
 }
-dependencies { implementation 'com.google.ar:core:1.49.0'; implementation 'androidx.appcompat:appcompat:1.7.0' }
+
+configurations.configureEach {
+    resolutionStrategy.eachDependency { details ->
+        if (details.requested.group == 'org.jetbrains.kotlin') {
+            details.useVersion '1.8.22'
+        }
+    }
+}
+
+dependencies {
+    implementation 'com.google.ar:core:1.49.0'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
+}
