@@ -37,7 +37,7 @@ public class MainActivity extends AppCompatActivity {
     private KeyframeRecorder keyframes;
     private TextView status, sensors, root;
     private ScannerView scannerView;
-    private boolean depthSupported;
+    private boolean depthSupported;\n    private volatile boolean sessionReady;\n    private Thread captureThread;
     private int lastPreviewFrame;
 
     @Override protected void onCreate(Bundle b) {
@@ -264,7 +264,7 @@ public class MainActivity extends AppCompatActivity {
     private static int clamp(int x) { return Math.max(0, Math.min(255, x)); }
     private static void sleep(long ms) { try { Thread.sleep(ms); } catch (InterruptedException ignored) {} }
 
-    @Override protected void onPause() { super.onPause(); if (session != null) session.pause(); }
+    @Override protected void onPause() { super.onPause(); if (session != null && sessionReady) { try { session.pause(); } catch (Exception ignored) {} } }\n\n    @Override protected void onResume() { super.onResume(); if (session != null && sessionReady) { try { session.resume(); } catch (Exception ignored) {} } }
     @Override protected void onDestroy() { if (fusion != null) fusion.close(); if (session != null) session.close(); super.onDestroy(); }
     @Override public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
                                                      @NonNull int[] grantResults) {
