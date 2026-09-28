@@ -6,8 +6,6 @@ import android.opengl.GLES11Ext;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.util.AttributeSet;
-import android.view.Surface;
-
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
@@ -24,7 +22,7 @@ public final class ScannerView extends GLSurfaceView {
 
     public ScannerView(Context context) { super(context); init(); }
     public ScannerView(Context context, AttributeSet attrs) { super(context, attrs); init(); }
-    public ScannerView(Context context, AttributeSet attrs, int defStyleAttr) { super(context, attrs, defStyleAttr); init(); }
+    public ScannerView(Context context, AttributeSet attrs, int defStyleAttr) { super(context, attrs); init(); }
 
     private void init() {
         setEGLContextClientVersion(2);
