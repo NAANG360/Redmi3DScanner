@@ -1,9 +1,13 @@
 package com.naang360.redmi3dscanner;
 
 import android.Manifest;
+import android.content.ContentValues;
+import android.content.pm.PackageManager;
 import android.media.Image;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
+import android.provider.MediaStore;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -14,19 +18,16 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.google.ar.core.ArCoreApk;
 import com.google.ar.core.Config;
 import com.google.ar.core.Frame;
-import com.google.ar.core.Pose;
-import com.google.ar.core.PointCloud;
 import com.google.ar.core.Session;
 import com.google.ar.core.TrackingState;
 import com.google.ar.core.exceptions.UnavailableDeviceNotCompatibleException;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.OutputStream;
+import java.nio.FloatBuffer;
 import java.util.Locale;
 
-/**
- * Capture controller. Depth is opportunistic: if the target device has no ARCore
- * depth support, we keep the tracking/keyframe foundation alive instead of faking depth.
- */
 public class MainActivity extends AppCompatActivity {
     private static final int CAMERA = 10;
     private Session session;
@@ -37,6 +38,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView status, sensors, root;
     private ScannerView scannerView;
     private boolean depthSupported;
+    private int lastPreviewFrame;
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -57,11 +59,11 @@ public class MainActivity extends AppCompatActivity {
         scan.setOnClickListener(v -> {
             scanning = !scanning;
             scan.setText(scanning ? "STOP SCAN" : "START SCAN");
-            status.setText(scanning ? "Capturing tracking + RGB…" : "Paused");
+            status.setText(scanning ? "Scanning visual feature cloud…" : "Paused");
         });
         findViewById(R.id.exportButton).setOnClickListener(v -> exportScan());
 
-        if (checkSelfPermission(Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[]{Manifest.permission.CAMERA}, CAMERA);
         else startAr();
     }
@@ -80,11 +82,11 @@ public class MainActivity extends AppCompatActivity {
             session.configure(c);
             session.resume();
             status.setText(depthSupported
-                    ? "RGB + ARCore raw depth ready"
-                    : "Tracking ready • depth unavailable • RGB keyframes active");
+                    ? "Depth + visual feature cloud ready"
+                    : "Visual feature cloud ready • depth unavailable");
             new Thread(this::captureLoop, "reconstruction-capture").start();
         } catch (UnavailableDeviceNotCompatibleException e) {
-            status.setText("ARCore unavailable — camera-only reconstruction backend next");
+            status.setText("ARCore unavailable — cannot acquire tracked feature cloud");
         } catch (Exception e) {
             status.setText("AR startup failed: " + e.getClass().getSimpleName());
         }
@@ -96,49 +98,68 @@ public class MainActivity extends AppCompatActivity {
             try {
                 Frame frame = session.update();
                 if (frame.getCamera().getTrackingState() != TrackingState.TRACKING) continue;
-                Pose pose = frame.getCamera().getPose();
-                float[] t = pose.getTranslation();
-                float[] q = pose.getRotationQuaternion();
-                float[] pose7 = new float[]{t[0],t[1],t[2],q[0],q[1],q[2],q[3]};
 
                 Image rgb = null;
                 try {
                     rgb = frame.acquireCameraImage();
-                    keyframes.add(System.currentTimeMillis(), pose7, rgb.getWidth(), rgb.getHeight(), 1.0f);
-                    // ARCore tracking itself exposes sparse visual-feature points even on phones\n                    // without the Depth API. This is our real no-ToF/no-LiDAR fallback.\n                    captureTrackingPoints(frame);\n                    if (depthSupported) captureDepth(frame, rgb, pose);
+                    keyframes.add(System.currentTimeMillis(),
+                            pose7(frame), rgb.getWidth(), rgb.getHeight(), 1.0f);
+
+                    // ARCore's tracked feature cloud exists independently of the Depth API.
+                    // These are real 3D visual feature observations in the AR world.
+                    int cloudCount = captureFeatureCloud(frame);
+
+                    if (lastPreviewFrame++ % 3 == 0) {
+                        scannerView.setPreview(rgb);
+                    }
+                    if (depthSupported) captureDepth(frame, rgb, frame.getCamera().getPose());
+
+                    final int points = scannerView.cloud().size();
+                    final int features = cloudCount;
+                    runOnUiThread(() -> {
+                        status.setText(String.format(Locale.US,
+                                "TRACKING • %d cloud vertices • %d AR features • %d keyframes",
+                                points, features, keyframes.size()));
+                        scannerView.setTrackedPoints(features);
+                        scannerView.invalidate();
+                    });
                 } finally {
                     if (rgb != null) rgb.close();
                 }
-
-                int points = scannerView.cloud().size();
-                runOnUiThread(() -> {
-                    status.setText(String.format(Locale.US, "TRACKING • %d pts • %d keyframes", points, keyframes.size()));
-                    scannerView.invalidate();
-                });
             } catch (Exception ignored) {
-                // Camera/depth frames are asynchronous; transient NotYetAvailable is expected.
+                // NotYetAvailable and transient camera-frame errors are expected.
             }
         }
     }
 
-    private void captureTrackingPoints(Frame frame) {
-        try (PointCloud pc = frame.acquirePointCloud()) {
-            java.nio.FloatBuffer pts = pc.getPoints();
-            // ARCore point cloud layout is X,Y,Z,confidence in world coordinates.
-            for (int i = 0; i + 3 < pts.limit(); i += 4) {
-                float x = pts.get(i);
-                float y = pts.get(i + 1);
-                float z = pts.get(i + 2);
-                float confidence = pts.get(i + 3);
-                if (confidence < 0.12f) continue;
-                scannerView.cloud().add(x, y, z, 235, 245, 255, confidence);
-            }
-        } catch (Exception ignored) {
-            // Point clouds can be temporarily unavailable while tracking initializes.
-        }
+    private float[] pose7(Frame frame) {
+        com.google.ar.core.Pose p = frame.getCamera().getPose();
+        float[] t = p.getTranslation();
+        float[] q = p.getRotationQuaternion();
+        return new float[]{t[0], t[1], t[2], q[0], q[1], q[2], q[3]};
     }
 
-    private void captureDepth(Frame frame, Image rgb, Pose pose) {
+    private int captureFeatureCloud(Frame frame) {
+        int count = 0;
+        try (com.google.ar.core.PointCloud pc = frame.acquirePointCloud()) {
+            FloatBuffer points = pc.getPoints();
+            int total = points.remaining() / 4;
+            // Voxel thinning in PointCloud keeps this bounded even on feature-rich scenes.
+            for (int i = 0; i < total; i += 2) {
+                float x = points.get(i * 4);
+                float y = points.get(i * 4 + 1);
+                float z = points.get(i * 4 + 2);
+                float confidence = points.get(i * 4 + 3);
+                if (confidence <= 0f || z <= -0.01f || z >= 100f) continue;
+                scannerView.cloud().add(x, y, z, 220, 220, 220,
+                        0f, 0f, 0f, confidence);
+                count++;
+            }
+        } catch (Exception ignored) {}
+        return count;
+    }
+
+    private void captureDepth(Frame frame, Image rgb, com.google.ar.core.Pose pose) {
         try (Image depth = frame.acquireRawDepthImage16Bits()) {
             Image.Plane dp = depth.getPlanes()[0];
             java.nio.ByteBuffer db = dp.getBuffer().duplicate();
@@ -169,7 +190,7 @@ public class MainActivity extends AppCompatActivity {
                             0f, 0f, 0f, Math.min(1f, 1.0f - (z / 8f)));
                 }
             }
-        } catch (Exception ignored) { }
+        } catch (Exception ignored) {}
     }
 
     private static int[] yuvAt(int x, int y,
@@ -183,25 +204,61 @@ public class MainActivity extends AppCompatActivity {
         int Y = yb.get(yi) & 255;
         int U = (ub.get(ui) & 255) - 128;
         int V = (vb.get(vi) & 255) - 128;
-        int r = Y + (int)(1.402f * V);
-        int g = Y - (int)(0.344136f * U + 0.714136f * V);
-        int b = Y + (int)(1.772f * U);
-        return new int[]{clamp(r), clamp(g), clamp(b)};
+        return new int[]{clamp(Y + (int)(1.402f * V)),
+                clamp(Y - (int)(0.344136f * U + 0.714136f * V)),
+                clamp(Y + (int)(1.772f * U))};
     }
 
     private void exportScan() {
         try {
-            File dir = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS);
-            if (dir == null) throw new Exception("No storage directory");
+            File dir = new File(getCacheDir(), "exports");
+            if (!dir.exists() && !dir.mkdirs()) throw new Exception("Cannot create export cache");
             String stamp = "scan-" + System.currentTimeMillis();
             File ply = new File(dir, stamp + ".ply");
             File csv = new File(dir, stamp + "-keyframes.csv");
             scannerView.cloud().writePly(ply);
             keyframes.writeCsv(csv);
-            Toast.makeText(this, "Saved RGB PLY + keyframe data", Toast.LENGTH_LONG).show();
+
+            Uri plyUri = publishDownload(ply, ply.getName(), "application/octet-stream");
+            Uri csvUri = publishDownload(csv, csv.getName(), "text/csv");
+            ply.delete(); csv.delete();
+
+            Toast.makeText(this,
+                    plyUri != null ? "Saved to Download/Redmi3DScanner" : "Export failed",
+                    Toast.LENGTH_LONG).show();
         } catch (Exception e) {
             Toast.makeText(this, "Export failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
+    }
+
+    private Uri publishDownload(File source, String name, String mime) throws Exception {
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            ContentValues v = new ContentValues();
+            v.put(MediaStore.Downloads.DISPLAY_NAME, name);
+            v.put(MediaStore.Downloads.MIME_TYPE, mime);
+            v.put(MediaStore.Downloads.RELATIVE_PATH,
+                    Environment.DIRECTORY_DOWNLOADS + "/Redmi3DScanner");
+            Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
+            if (uri == null) throw new Exception("MediaStore insert failed");
+            try (FileInputStream in = new FileInputStream(source);
+                 OutputStream out = getContentResolver().openOutputStream(uri)) {
+                if (out == null) throw new Exception("Cannot open destination");
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
+            }
+            return uri;
+        }
+        File downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        File targetDir = new File(downloads, "Redmi3DScanner");
+        if (!targetDir.exists() && !targetDir.mkdirs()) throw new Exception("Cannot create Downloads folder");
+        File target = new File(targetDir, name);
+        try (FileInputStream in = new FileInputStream(source);
+             OutputStream out = new java.io.FileOutputStream(target)) {
+            byte[] buf = new byte[8192]; int n;
+            while ((n=in.read(buf))!=-1) out.write(buf,0,n);
+        }
+        return Uri.fromFile(target);
     }
 
     private static int clamp(int x) { return Math.max(0, Math.min(255, x)); }
@@ -213,6 +270,6 @@ public class MainActivity extends AppCompatActivity {
                                                      @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == CAMERA && grantResults.length > 0 &&
-                grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) startAr();
+                grantResults[0] == PackageManager.PERMISSION_GRANTED) startAr();
     }
 }
