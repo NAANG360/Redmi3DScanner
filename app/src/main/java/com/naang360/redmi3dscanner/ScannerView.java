@@ -52,7 +52,7 @@ public final class ScannerView extends GLSurfaceView {
         int program;
         int positionHandle, texHandle, matrixHandle;
         final float[] stMatrix = new float[16];
-        final FloatBuffer vertices = ByteBuffer.allocateDirect(16).order(ByteOrder.nativeOrder()).asFloatBuffer();
+        final FloatBuffer vertices = ByteBuffer.allocateDirect(32).order(ByteOrder.nativeOrder()).asFloatBuffer();
         final FloatBuffer texCoords = ByteBuffer.allocateDirect(16).order(ByteOrder.nativeOrder()).asFloatBuffer();
 
         RendererImpl() {
