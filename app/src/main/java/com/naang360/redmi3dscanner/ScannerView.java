@@ -1,0 +1,3 @@
+package com.naang360.redmi3dscanner;
+import android.content.*;import android.graphics.*;import android.view.*;
+public final class ScannerView extends View {private final Paint p=new Paint(1);private final PointCloud c=new PointCloud(250000);public ScannerView(Context x){super(x);p.setColor(Color.WHITE);p.setTextSize(24);}public PointCloud cloud(){return c;}protected void onDraw(Canvas x){super.onDraw(x);x.drawText("3D Scanner",20,getHeight()-70,p);x.drawText("Points: "+c.size(),20,getHeight()-35,p);}}
