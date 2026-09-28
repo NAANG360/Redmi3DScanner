@@ -1,0 +1,3 @@
+package com.naang360.redmi3dscanner;
+import java.io.*;
+public final class RootAccess { private RootAccess(){} public static boolean isRootAvailable(){try{Process p=Runtime.getRuntime().exec(new String[]{"su","-c","id"});BufferedReader r=new BufferedReader(new InputStreamReader(p.getInputStream()));String s=r.readLine();p.waitFor();return s!=null&&s.contains("uid=0");}catch(Exception e){return false;}} public static String run(String c){try{Process p=Runtime.getRuntime().exec(new String[]{"su","-c",c});BufferedReader r=new BufferedReader(new InputStreamReader(p.getInputStream()));StringBuilder b=new StringBuilder();String l;while((l=r.readLine())!=null)b.append(l).append("\n");p.waitFor();return b.toString();}catch(Exception e){return "";}}}
