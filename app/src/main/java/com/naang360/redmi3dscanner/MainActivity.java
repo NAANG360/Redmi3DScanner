@@ -367,28 +367,41 @@ public class MainActivity extends AppCompatActivity {
             File ply = new File(dir, stamp + ".ply");
             File obj = new File(dir, stamp + ".obj");
             File csv = new File(dir, stamp + "-keyframes.csv");
+            File glb = new File(dir, stamp + ".glb");
+            File stl = new File(dir, stamp + ".stl");
 
             scannerView.cloud().writePly(ply);
-            if (denseMesh.faceCount() > 0) denseMesh.writeObj(obj);
-            else scannerView.cloud().writeObj(obj);
+            if (denseMesh.faceCount() > 0) {
+                denseMesh.cleanup();
+                denseMesh.writeObj(obj);
+                denseMesh.writeGlb(glb);
+                denseMesh.writeBinaryStl(stl);
+            } else {
+                scannerView.cloud().writeObj(obj);
+            }
             keyframes.writeCsv(csv);
 
             Uri plyUri = publishDownload(ply, ply.getName(), "application/octet-stream");
             Uri objUri = publishDownload(obj, obj.getName(), "text/plain");
             Uri csvUri = publishDownload(csv, csv.getName(), "text/csv");
+            Uri glbUri = glb.exists() ? publishDownload(glb, glb.getName(), "model/gltf-binary") : null;
+            Uri stlUri = stl.exists() ? publishDownload(stl, stl.getName(), "model/stl") : null;
 
             ply.delete();
             obj.delete();
             csv.delete();
+            glb.delete();
+            stl.delete();
 
             if (plyUri != null && objUri != null && csvUri != null) {
+                String formats = glbUri != null && stlUri != null ? "PLY + OBJ + GLB + STL + keyframes"
+                        : "PLY + OBJ + keyframes (no triangulated mesh available for GLB/STL)";
                 Toast.makeText(this,
-                        "Saved PLY + OBJ mesh (" + denseMesh.faceCount() + " faces) + keyframes to Download/Redmi3DScanner",
+                        "Saved " + formats + " • " + denseMesh.vertexCount() + " mesh vertices / "
+                                + denseMesh.faceCount() + " faces in Download/Redmi3DScanner",
                         Toast.LENGTH_LONG).show();
             } else {
-                Toast.makeText(this,
-                        "Export failed",
-                        Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "Export failed", Toast.LENGTH_LONG).show();
             }
 
         } catch (Exception e) {
