@@ -230,61 +230,68 @@ public class MainActivity extends AppCompatActivity {
         return accepted;
     }
 
+    /**
+     * Fuse ARCore raw depth into the world-space cloud using calibrated camera rays.
+     * ARCore camera coordinates look down -Z; Pose transforms camera-local points to world.
+     */
     private void captureDepth(Frame frame, Image rgb, Pose pose) {
         try (Image depth = frame.acquireRawDepthImage16Bits()) {
             Image.Plane dp = depth.getPlanes()[0];
             java.nio.ByteBuffer db = dp.getBuffer().duplicate();
+            int dw = depth.getWidth(), dh = depth.getHeight();
+            int rw = rgb.getWidth(), rh = rgb.getHeight();
 
-            int dw = depth.getWidth();
-            int dh = depth.getHeight();
-            int rw = rgb.getWidth();
-            int rh = rgb.getHeight();
+            // Intrinsics are reported for the camera image size, which may differ from depth.
+            com.google.ar.core.CameraIntrinsics intr = frame.getCamera().getImageIntrinsics();
+            float[] focal = intr.getFocalLength();
+            float[] principal = intr.getPrincipalPoint();
+            int[] imageSize = intr.getImageDimensions();
+            float sx = dw / (float) Math.max(1, imageSize[0]);
+            float sy = dh / (float) Math.max(1, imageSize[1]);
+            float fx = focal[0] * sx, fy = focal[1] * sy;
+            float cx = principal[0] * sx, cy = principal[1] * sy;
+            if (!(fx > 0f && fy > 0f)) return;
 
             Image.Plane[] rp = rgb.getPlanes();
-            Image.Plane yp = rp[0];
-            Image.Plane up = rp[1];
-            Image.Plane vp = rp[2];
-
+            Image.Plane yp = rp[0], up = rp[1], vp = rp[2];
             java.nio.ByteBuffer yb = yp.getBuffer().duplicate();
             java.nio.ByteBuffer ub = up.getBuffer().duplicate();
             java.nio.ByteBuffer vb = vp.getBuffer().duplicate();
 
-            float[] tr = pose.getTranslation();
+            float[] cameraPoint = new float[3];
+            float[] worldPoint = new float[3];
+            int pixelStride = Math.max(1, dp.getPixelStride());
+            int rowStride = dp.getRowStride();
 
-            for (int y = 2; y < dh - 2; y += 4) {
-                int drow = y * dp.getRowStride();
+            // Sample every third depth pixel: denser than the old 4-pixel grid,
+            // while keeping CPU and memory use reasonable on the Snapdragon 660.
+            for (int y = 2; y < dh - 2; y += 3) {
+                int drow = y * rowStride;
+                for (int x = 2; x < dw - 2; x += 3) {
+                    int off = drow + x * pixelStride;
+                    if (off < 0 || off + 1 >= db.limit()) continue;
 
-                for (int x = 2; x < dw - 2; x += 4) {
-                    int off = drow + x * dp.getPixelStride();
-                    if (off + 1 >= db.limit()) continue;
-
-                    int mm = (db.get(off) & 255)
-                            | ((db.get(off + 1) & 255) << 8);
-
-                    if (mm < 80 || mm > 8000) continue;
+                    int mm = (db.get(off) & 255) | ((db.get(off + 1) & 255) << 8);
+                    if (mm < 150 || mm > 6000) continue;
 
                     float z = mm / 1000f;
-                    float nx = (x - dw * 0.5f) / (float) dw;
-                    float ny = (y - dh * 0.5f) / (float) dh;
+                    cameraPoint[0] = (x - cx) * z / fx;
+                    cameraPoint[1] = -(y - cy) * z / fy;
+                    cameraPoint[2] = -z;
+                    pose.transformPoint(cameraPoint, 0, worldPoint, 0);
 
+                    // Raw depth and CPU camera image can have different dimensions.
                     int rx = Math.min(rw - 1, Math.max(0, x * rw / dw));
                     int ry = Math.min(rh - 1, Math.max(0, y * rh / dh));
+                    int[] color = yuvAt(rx, ry, yp, up, vp, yb, ub, vb);
 
-                    int[] color = yuvAt(
-                            rx, ry,
-                            yp, up, vp,
-                            yb, ub, vb);
-
-                    scannerView.cloud().add(
-                            tr[0] + nx * z,
-                            tr[1] - ny * z,
-                            tr[2] + z,
-                            color[0], color[1], color[2],
-                            0f, 0f, 0f,
-                            Math.min(1f, 1f - z / 8f));
+                    float confidence = Math.max(0.05f, Math.min(1f, 1f - z / 7f));
+                    scannerView.cloud().add(worldPoint[0], worldPoint[1], worldPoint[2],
+                            color[0], color[1], color[2], 0f, 0f, 0f, confidence);
                 }
             }
         } catch (Exception ignored) {
+            // Raw depth is optional and device/runtime-dependent. Never crash a scan for it.
         }
     }
 
