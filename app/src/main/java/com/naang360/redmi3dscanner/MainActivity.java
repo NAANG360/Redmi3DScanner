@@ -43,6 +43,7 @@ public class MainActivity extends AppCompatActivity {
 
     private SensorFusion fusion;
     private KeyframeRecorder keyframes;
+    private ScanSessionArchive scanArchive;
     private FeatureReconstruction reconstruction;
     private final DenseMesh denseMesh = new DenseMesh();
     private final MonocularDepthModel monocularDepth = new MonocularDepthModel();
@@ -67,6 +68,7 @@ public class MainActivity extends AppCompatActivity {
         visionReady = OpenCVLoader.initLocal();
         fusion = new SensorFusion(this);
         keyframes = new KeyframeRecorder(120);
+        scanArchive = new ScanSessionArchive(getFilesDir());
         reconstruction = new FeatureReconstruction();
 
         sensors.setText(String.format(Locale.US,
@@ -82,6 +84,7 @@ public class MainActivity extends AppCompatActivity {
                 scannerView.cloud().clear();
                 denseMesh.clear();
                 keyframes.clear();
+                scanArchive.reset();
                 reconstruction.reset();
                 status.setText("Scanning… move slowly around the object");
             } else {
@@ -185,6 +188,8 @@ public class MainActivity extends AppCompatActivity {
                         Image rgb = null;
                         try {
                             rgb = frame.acquireCameraImage();
+                            if (rgb != null) scanArchive.maybeCapture(rgb, pose,
+                                    frame.getCamera().getImageIntrinsics(), now);
                             if (visionReady) {
                                 reconstruction.process(frame, rgb, scannerView.cloud(), now);
                                 featureCount = Math.max(featureCount, reconstruction.getLastMatchCount());
@@ -369,6 +374,7 @@ public class MainActivity extends AppCompatActivity {
             File csv = new File(dir, stamp + "-keyframes.csv");
             File glb = new File(dir, stamp + ".glb");
             File stl = new File(dir, stamp + ".stl");
+            File dataset = new File(dir, stamp + "-photogrammetry-dataset.zip");
 
             scannerView.cloud().writePly(ply);
             if (denseMesh.faceCount() > 0) {
@@ -380,18 +386,21 @@ public class MainActivity extends AppCompatActivity {
                 scannerView.cloud().writeObj(obj);
             }
             keyframes.writeCsv(csv);
+            if (scanArchive.frameCount() > 0) scanArchive.writeZip(dataset);
 
             Uri plyUri = publishDownload(ply, ply.getName(), "application/octet-stream");
             Uri objUri = publishDownload(obj, obj.getName(), "text/plain");
             Uri csvUri = publishDownload(csv, csv.getName(), "text/csv");
             Uri glbUri = glb.exists() ? publishDownload(glb, glb.getName(), "model/gltf-binary") : null;
             Uri stlUri = stl.exists() ? publishDownload(stl, stl.getName(), "model/stl") : null;
+            Uri datasetUri = dataset.exists() ? publishDownload(dataset, dataset.getName(), "application/zip") : null;
 
             ply.delete();
             obj.delete();
             csv.delete();
             glb.delete();
             stl.delete();
+            dataset.delete();
 
             if (plyUri != null && objUri != null && csvUri != null) {
                 String formats = glbUri != null && stlUri != null ? "PLY + OBJ + GLB + STL + keyframes"
@@ -502,6 +511,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override protected void onDestroy() {
         if (fusion != null) fusion.close();
+        if (scanArchive != null) scanArchive.close();
 
         if (session != null) {
             try {
