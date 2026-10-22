@@ -41,6 +41,7 @@ public class MainActivity extends AppCompatActivity {
 
     private SensorFusion fusion;
     private KeyframeRecorder keyframes;
+    private FeatureReconstruction reconstruction;
     private ScannerView scannerView;
     private TextView status, sensors, root;
     private Thread captureThread;
@@ -56,6 +57,7 @@ public class MainActivity extends AppCompatActivity {
 
         fusion = new SensorFusion(this);
         keyframes = new KeyframeRecorder(120);
+        reconstruction = new FeatureReconstruction();
 
         sensors.setText(String.format(Locale.US,
                 "Accel %s • Gyro %s • Mag %s",
@@ -69,6 +71,7 @@ public class MainActivity extends AppCompatActivity {
             if (scanning) {
                 scannerView.cloud().clear();
                 keyframes.clear();
+                reconstruction.reset();
                 status.setText("Scanning… move slowly around the object");
             } else {
                 status.setText("Scan paused • " + scannerView.cloud().size() + " vertices captured");
@@ -166,14 +169,15 @@ public class MainActivity extends AppCompatActivity {
 
                     featureCount = captureTrackingPoints(frame);
 
-                    if (depthSupported) {
-                        Image rgb = null;
-                        try {
-                            rgb = frame.acquireCameraImage();
-                            captureDepth(frame, rgb, pose);
-                        } finally {
-                            if (rgb != null) rgb.close();
-                        }
+                    // Image-based triangulation is the fallback when ARCore depth is unavailable.
+                    Image rgb = null;
+                    try {
+                        rgb = frame.acquireCameraImage();
+                        reconstruction.process(frame, rgb, scannerView.cloud(), System.currentTimeMillis());
+                        featureCount = Math.max(featureCount, reconstruction.getLastMatchCount());
+                        if (depthSupported) captureDepth(frame, rgb, pose);
+                    } finally {
+                        if (rgb != null) rgb.close();
                     }
                 }
 
