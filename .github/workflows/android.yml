@@ -40,6 +40,9 @@ jobs:
           test "$(stat -c%s app/src/main/assets/midas_small.onnx)" -gt 1000000
           cp licenses/MIDAS-MIT-LICENSE.txt app/src/main/assets/midas_license.txt
 
+      - name: Validate COLMAP helper scripts
+        run: python3 -m py_compile scripts/prepare_colmap_dataset.py scripts/write_reconstruction_report.py
+
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
 
