@@ -29,8 +29,8 @@ public final class FeatureReconstruction {
 
     private static final class Feature {
         final int x, y, index;
-        Feature(float x, float y, int index) {
-            this.x = Math.round(x); this.y = Math.round(y); this.index = index;
+        Feature(double x, double y, int index) {
+            this.x = (int)Math.round(x); this.y = (int)Math.round(y); this.index = index;
         }
     }
 
