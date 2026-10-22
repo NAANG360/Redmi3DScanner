@@ -23,6 +23,7 @@ import com.google.ar.core.PointCloud;
 import com.google.ar.core.Session;
 import com.google.ar.core.TrackingState;
 import com.google.ar.core.exceptions.UnavailableDeviceNotCompatibleException;
+import org.opencv.android.OpenCVLoader;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -38,6 +39,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean installRequested;
     private boolean depthSupported;
     private boolean sessionReady;
+    private boolean visionReady;
 
     private SensorFusion fusion;
     private KeyframeRecorder keyframes;
@@ -56,13 +58,14 @@ public class MainActivity extends AppCompatActivity {
         root = findViewById(R.id.root);
         scannerView = findViewById(R.id.scannerView);
 
+        visionReady = OpenCVLoader.initLocal();
         fusion = new SensorFusion(this);
         keyframes = new KeyframeRecorder(120);
         reconstruction = new FeatureReconstruction();
 
         sensors.setText(String.format(Locale.US,
-                "Accel %s • Gyro %s • Mag %s",
-                fusion.hasAccelerometer(), fusion.hasGyroscope(), fusion.hasMagnetometer()));
+                "ORB %s • Accel %s • Gyro %s • Mag %s",
+                visionReady ? "READY" : "FAILED", fusion.hasAccelerometer(), fusion.hasGyroscope(), fusion.hasMagnetometer()));
         root.setText("Root: " + (RootAccess.isRootAvailable() ? "AVAILABLE" : "not available (optional)"));
 
         Button scan = findViewById(R.id.scanButton);
@@ -177,8 +180,10 @@ public class MainActivity extends AppCompatActivity {
                         Image rgb = null;
                         try {
                             rgb = frame.acquireCameraImage();
-                            reconstruction.process(frame, rgb, scannerView.cloud(), now);
-                            featureCount = Math.max(featureCount, reconstruction.getLastMatchCount());
+                            if (visionReady) {
+                                reconstruction.process(frame, rgb, scannerView.cloud(), now);
+                                featureCount = Math.max(featureCount, reconstruction.getLastMatchCount());
+                            }
                             if (depthSupported) captureDepth(frame, rgb, pose);
                         } finally {
                             if (rgb != null) rgb.close();
