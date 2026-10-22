@@ -45,11 +45,15 @@ public class MainActivity extends AppCompatActivity {
     private KeyframeRecorder keyframes;
     private FeatureReconstruction reconstruction;
     private final DenseMesh denseMesh = new DenseMesh();
+    private final MonocularDepthModel monocularDepth = new MonocularDepthModel();
+    private volatile boolean aiDepthReady;
+    private volatile boolean aiDepthInitStarted;
     private ScannerView scannerView;
     private TextView status, sensors, root;
     private Thread captureThread;
     private long lastImageCaptureMs;
     private long lastDepthCaptureMs;
+    private long lastAiDepthCaptureMs;
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -188,6 +192,17 @@ public class MainActivity extends AppCompatActivity {
                             if (depthSupported && now - lastDepthCaptureMs >= 440) {
                                 lastDepthCaptureMs = now;
                                 captureDepth(frame, rgb, pose);
+                            }
+                            if (!depthSupported) {
+                                if (!aiDepthInitStarted) {
+                                    aiDepthInitStarted = true;
+                                    new Thread(() -> aiDepthReady = monocularDepth.initialize(getApplicationContext()),
+                                            "midas-model-init").start();
+                                }
+                                if (aiDepthReady && now - lastAiDepthCaptureMs >= 900) {
+                                    lastAiDepthCaptureMs = now;
+                                    monocularDepth.reconstruct(getApplicationContext(), frame, rgb, denseMesh);
+                                }
                             }
                         } finally {
                             if (rgb != null) rgb.close();
