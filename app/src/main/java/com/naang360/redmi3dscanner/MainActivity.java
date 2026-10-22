@@ -100,7 +100,7 @@ public class MainActivity extends AppCompatActivity {
                     session.resume();
                     status.setText(depthSupported
                             ? "CAMERA LIVE • ARCore depth + tracking"
-                            : "CAMERA LIVE • visual tracking (no depth support)");
+                            : "CAMERA LIVE • visual tracking + MiDaS fallback");
                     startCaptureThread();
                 }
             } catch (Exception e) {
@@ -219,8 +219,8 @@ public class MainActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     if (scanning) {
                         status.setText(String.format(Locale.US,
-                                "TRACKING • %d vertices • %d features • %d keyframes",
-                                points, features, frames));
+                                "TRACKING • %d points • %d matches • %d frames • %d mesh faces",
+                                points, features, frames, denseMesh.faceCount()));
                     } else {
                         status.setText("CAMERA LIVE • press START SCAN");
                     }
