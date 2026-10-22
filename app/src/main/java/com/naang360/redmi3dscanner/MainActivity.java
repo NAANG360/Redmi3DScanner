@@ -45,6 +45,7 @@ public class MainActivity extends AppCompatActivity {
     private ScannerView scannerView;
     private TextView status, sensors, root;
     private Thread captureThread;
+    private long lastImageCaptureMs;
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -169,15 +170,19 @@ public class MainActivity extends AppCompatActivity {
 
                     featureCount = captureTrackingPoints(frame);
 
-                    // Image-based triangulation is the fallback when ARCore depth is unavailable.
-                    Image rgb = null;
-                    try {
-                        rgb = frame.acquireCameraImage();
-                        reconstruction.process(frame, rgb, scannerView.cloud(), System.currentTimeMillis());
-                        featureCount = Math.max(featureCount, reconstruction.getLastMatchCount());
-                        if (depthSupported) captureDepth(frame, rgb, pose);
-                    } finally {
-                        if (rgb != null) rgb.close();
+                    // Throttle CPU-heavy image analysis on the Snapdragon 660.
+                    long now = System.currentTimeMillis();
+                    if (now - lastImageCaptureMs >= 220) {
+                        lastImageCaptureMs = now;
+                        Image rgb = null;
+                        try {
+                            rgb = frame.acquireCameraImage();
+                            reconstruction.process(frame, rgb, scannerView.cloud(), now);
+                            featureCount = Math.max(featureCount, reconstruction.getLastMatchCount());
+                            if (depthSupported) captureDepth(frame, rgb, pose);
+                        } finally {
+                            if (rgb != null) rgb.close();
+                        }
                     }
                 }
 
