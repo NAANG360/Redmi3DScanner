@@ -78,7 +78,7 @@ public final class MonocularDepthModel {
             output=net.forward();
             int oh=(int)output.size(output.dims()-2), ow=(int)output.size(output.dims()-1);
             if(oh<8||ow<8) return 0;
-            float[] raw=new float[oh*ow]; output.get(new int[]{0,0,0,0},raw);
+            float[] raw=new float[oh*ow]; output.get(new int[output.dims()],raw);
             float min=Float.POSITIVE_INFINITY,max=Float.NEGATIVE_INFINITY;
             for(float v:raw) if(Float.isFinite(v)){min=Math.min(min,v);max=Math.max(max,v);}
             if(!Float.isFinite(min)||!Float.isFinite(max)||max-min<1e-6f) return 0;
