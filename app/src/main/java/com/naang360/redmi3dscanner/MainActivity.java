@@ -403,8 +403,10 @@ public class MainActivity extends AppCompatActivity {
             dataset.delete();
 
             if (plyUri != null && objUri != null && csvUri != null) {
-                String formats = glbUri != null && stlUri != null ? "PLY + OBJ + GLB + STL + keyframes"
-                        : "PLY + OBJ + keyframes (no triangulated mesh available for GLB/STL)";
+                String formats = glbUri != null && stlUri != null ? "PLY + OBJ + GLB + STL"
+                        : "PLY + OBJ (no triangulated mesh available for GLB/STL)";
+                if (datasetUri != null) formats += " + " + scanArchive.frameCount() + " calibrated source frames (ZIP)";
+                formats += " + keyframes CSV";
                 Toast.makeText(this,
                         "Saved " + formats + " • " + denseMesh.vertexCount() + " mesh vertices / "
                                 + denseMesh.faceCount() + " faces in Download/Redmi3DScanner",
