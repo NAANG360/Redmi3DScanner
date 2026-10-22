@@ -354,9 +354,9 @@ public class MainActivity extends AppCompatActivity {
     private void exportScan() {
         int vertices = scannerView.cloud().size();
 
-        if (vertices == 0) {
+        if (vertices == 0 && (scanArchive == null || scanArchive.frameCount() == 0)) {
             Toast.makeText(this,
-                    "Nothing to export — scan first and capture some vertices.",
+                    "Nothing to export — scan first and capture camera keyframes.",
                     Toast.LENGTH_LONG).show();
             return;
         }
