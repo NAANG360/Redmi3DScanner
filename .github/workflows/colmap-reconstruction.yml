@@ -1,0 +1,89 @@
+name: COLMAP reconstruction
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_url:
+        description: "Direct download URL to the Redmi3DScanner *-photogrammetry-dataset.zip"
+        required: true
+        type: string
+      dense:
+        description: "Attempt dense MVS (requires CUDA-enabled COLMAP and GPU; hosted runners usually lack one)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: colmap-reconstruction-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  reconstruct:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install COLMAP and utilities
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y colmap unzip zip python3
+          colmap -h
+          colmap feature_extractor -h >/dev/null
+
+      - name: Download and validate scan dataset
+        env:
+          DATASET_URL: ${{ inputs.dataset_url }}
+        run: |
+          mkdir -p work/input work/output
+          curl --fail --location --retry 3 --connect-timeout 20 "$DATASET_URL" -o work/dataset.zip
+          unzip -t work/dataset.zip
+          unzip -q work/dataset.zip -d work/input
+          test -s work/input/manifest.csv
+          test "$(find work/input -maxdepth 1 -type f -name "frame-*.jpg" | wc -l)" -ge 8
+          python3 scripts/prepare_colmap_dataset.py work/input work/prepared
+
+      - name: Run COLMAP sparse Structure-from-Motion
+        run: |
+          set -euo pipefail
+          mkdir -p work/output/sparse
+          colmap feature_extractor --database_path work/output/database.db --image_path work/prepared/images --ImageReader.camera_model PINHOLE --ImageReader.camera_params "$(cat work/prepared/camera_params.txt)" --ImageReader.single_camera 1 --SiftExtraction.use_gpu 0
+          colmap exhaustive_matcher --database_path work/output/database.db --SiftMatching.use_gpu 0
+          colmap mapper --database_path work/output/database.db --image_path work/prepared/images --output_path work/output/sparse
+          MODEL="$(find work/output/sparse -mindepth 1 -maxdepth 1 -type d | sort | head -n1)"
+          test -n "$MODEL"
+          colmap model_analyzer --path "$MODEL" | tee work/output/model-summary.txt
+          colmap model_converter --input_path "$MODEL" --output_path work/output/sparse-model.ply --output_type PLY
+          cp "$MODEL"/cameras.txt "$MODEL"/images.txt "$MODEL"/points3D.txt work/output/ 2>/dev/null || true
+
+      - name: Optional dense multi-view stereo
+        if: ${{ inputs.dense }}
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          MODEL="$(find work/output/sparse -mindepth 1 -maxdepth 1 -type d | sort | head -n1)"
+          mkdir -p work/output/dense
+          colmap image_undistorter --image_path work/prepared/images --input_path "$MODEL" --output_path work/output/dense --output_type COLMAP
+          colmap patch_match_stereo --workspace_path work/output/dense --workspace_format COLMAP --PatchMatchStereo.geom_consistency true
+          colmap stereo_fusion --workspace_path work/output/dense --workspace_format COLMAP --input_type geometric --output_path work/output/dense/fused.ply
+          colmap poisson_mesher --input_path work/output/dense/fused.ply --output_path work/output/dense/mesh.ply
+
+      - name: Package reconstruction results
+        if: always()
+        run: |
+          python3 scripts/write_reconstruction_report.py work/output || true
+          cd work/output
+          zip -qr ../colmap-reconstruction-results.zip .
+
+      - name: Upload reconstruction results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Redmi3DScanner-COLMAP-results
+          path: work/colmap-reconstruction-results.zip
+          if-no-files-found: warn
+          retention-days: 14
