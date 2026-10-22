@@ -136,8 +136,8 @@ public final class FeatureReconstruction {
                             if(Math.abs(old.x-now.x)<2 && Math.abs(old.y-now.y)<2) continue;
                             float[] world=triangulate(previous,old,current,now);
                             if(world==null) continue;
-                            int lum=gray[now.y*width+now.x]&255;
-                            if(cloud.add(world[0],world[1],world[2],lum,lum,lum,0f,0f,0f,0.55f)) added++;
+                            int[] color=sampleColor(image,gray,now.x,now.y);
+                            if(cloud.add(world[0],world[1],world[2],color[0],color[1],color[2],0f,0f,0f,0.55f)) added++;
                             lastMatchCount++;
                         }
                     } finally {
@@ -155,6 +155,20 @@ public final class FeatureReconstruction {
             grayMat.release(); keypoints.release(); mask.release();
         }
     }
+
+    private static int[] sampleColor(Image image, byte[] gray, int x, int y) {
+        Image.Plane[] planes=image.getPlanes();
+        int yy=gray[y*image.getWidth()+x]&255;
+        Image.Plane up=planes[1], vp=planes[2];
+        ByteBuffer ub=up.getBuffer().duplicate(), vb=vp.getBuffer().duplicate();
+        int ui=(y/2)*up.getRowStride()+(x/2)*up.getPixelStride();
+        int vi=(y/2)*vp.getRowStride()+(x/2)*vp.getPixelStride();
+        if(ui<0 || vi<0 || ui>=ub.limit() || vi>=vb.limit()) return new int[]{yy,yy,yy};
+        int u=(ub.get(ui)&255)-128, v=(vb.get(vi)&255)-128;
+        return new int[]{clamp(yy+(int)(1.402f*v)),clamp(yy-(int)(0.344136f*u+0.714136f*v)),clamp(yy+(int)(1.772f*u))};
+    }
+
+    private static int clamp(int value) { return Math.max(0,Math.min(255,value)); }
 
     private static Feature findFeature(List<Feature> features,int index) {
         for(Feature f:features) if(f.index==index) return f;
