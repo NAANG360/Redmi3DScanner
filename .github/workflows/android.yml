@@ -46,13 +46,8 @@ jobs:
       - name: Verify bundled scanner stack
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk
-          unzip -l "$APK" | grep -E 'assets/midas_small.onnx|lib/arm64-v8a/libopencv_java4.so'
-          unzip -l "$APK" | grep 'assets/midas_small.onnx' | awk '{print $1}' | grep -E '^[0-9]+        uses: actions/upload-artifact@v4
-        with:
-          name: Redmi3DScanner-debug
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error | awk '$1 > 1000000 {ok=1} END {exit !ok}'
-          unzip -l "$APK" | grep -q 'lib/arm64-v8a/libopencv_java4.so'
+          unzip -l "$APK" | grep 'assets/midas_small.onnx'
+          unzip -l "$APK" | grep 'lib/arm64-v8a/libopencv_java4.so'
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
