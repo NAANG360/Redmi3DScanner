@@ -10,6 +10,9 @@ import org.opencv.core.KeyPoint;
 import org.opencv.core.Mat;
 import org.opencv.core.MatOfDMatch;
 import org.opencv.core.MatOfKeyPoint;
+import org.opencv.core.MatOfPoint2f;
+import org.opencv.core.Point;
+import org.opencv.calib3d.Calib3d;
 import org.opencv.features2d.BFMatcher;
 import org.opencv.features2d.ORB;
 import java.nio.ByteBuffer;
@@ -49,6 +52,13 @@ public final class FeatureReconstruction {
             this.descriptors=descriptors;
         }
         void release() { if (descriptors != null) descriptors.release(); }
+    }
+
+    private static final class Candidate {
+        final Feature oldFeature, newFeature;
+        Candidate(Feature oldFeature, Feature newFeature) {
+            this.oldFeature=oldFeature; this.newFeature=newFeature;
+        }
     }
 
     private View previous;
@@ -122,6 +132,7 @@ public final class FeatureReconstruction {
                     try {
                         matcher.knnMatch(previous.descriptors,current.descriptors,pairs,2);
                         boolean[] usedCurrent=new boolean[points.length];
+                        ArrayList<Candidate> candidates=new ArrayList<>();
                         for(MatOfDMatch pair:pairs) {
                             DMatch[] matches=pair.toArray();
                             if(matches.length<2) continue;
@@ -134,11 +145,40 @@ public final class FeatureReconstruction {
                             if(old==null || now==null) continue;
                             usedCurrent[newIndex]=true;
                             if(Math.abs(old.x-now.x)<2 && Math.abs(old.y-now.y)<2) continue;
-                            float[] world=triangulate(previous,old,current,now);
-                            if(world==null) continue;
-                            int[] color=sampleColor(image,gray,now.x,now.y);
-                            if(cloud.add(world[0],world[1],world[2],color[0],color[1],color[2],0f,0f,0f,0.55f)) added++;
-                            lastMatchCount++;
+                            candidates.add(new Candidate(old,now));
+                        }
+
+                        // Geometric verification rejects descriptor matches that do not
+                        // agree with a common two-view epipolar geometry.
+                        if(candidates.size()>=8) {
+                            ArrayList<Point> oldPoints=new ArrayList<>(candidates.size());
+                            ArrayList<Point> newPoints=new ArrayList<>(candidates.size());
+                            for(Candidate candidate:candidates) {
+                                oldPoints.add(new Point(candidate.oldFeature.x,candidate.oldFeature.y));
+                                newPoints.add(new Point(candidate.newFeature.x,candidate.newFeature.y));
+                            }
+                            MatOfPoint2f oldMat=new MatOfPoint2f(); oldMat.fromList(oldPoints);
+                            MatOfPoint2f newMat=new MatOfPoint2f(); newMat.fromList(newPoints);
+                            Mat inlierMask=new Mat();
+                            Mat fundamental=null;
+                            try {
+                                fundamental=Calib3d.findFundamentalMat(oldMat,newMat,Calib3d.FM_RANSAC,2.5,0.99,inlierMask);
+                                if(fundamental!=null && !fundamental.empty() && inlierMask.total()>=candidates.size()) {
+                                    for(int i=0;i<candidates.size();i++) {
+                                        double[] inlier=inlierMask.get(i,0);
+                                        if(inlier==null || inlier.length==0 || inlier[0]==0) continue;
+                                        Candidate candidate=candidates.get(i);
+                                        float[] world=triangulate(previous,candidate.oldFeature,current,candidate.newFeature);
+                                        if(world==null) continue;
+                                        int[] color=sampleColor(image,gray,candidate.newFeature.x,candidate.newFeature.y);
+                                        if(cloud.add(world[0],world[1],world[2],color[0],color[1],color[2],0f,0f,0f,0.65f)) added++;
+                                        lastMatchCount++;
+                                    }
+                                }
+                            } finally {
+                                oldMat.release();newMat.release();inlierMask.release();
+                                if(fundamental!=null) fundamental.release();
+                            }
                         }
                     } finally {
                         for(MatOfDMatch pair:pairs) pair.release();
