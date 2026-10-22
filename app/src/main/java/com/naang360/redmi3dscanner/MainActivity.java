@@ -206,31 +206,26 @@ public class MainActivity extends AppCompatActivity {
 
     private int captureTrackingPoints(Frame frame) {
         int accepted = 0;
+        Pose pose = frame.getCamera().getPose();
+        float[] cameraPoint = new float[3];
+        float[] worldPoint = new float[3];
 
-        try (PointCloud pc = frame.acquirePointCloud()) {
+        try (com.google.ar.core.PointCloud pc = frame.acquirePointCloud()) {
             FloatBuffer points = pc.getPoints();
-
-            // ARCore point cloud layout: X,Y,Z,confidence.
-            // Voxel thinning in PointCloud prevents runaway growth.
+            // ARCore point-cloud coordinates are camera-local; transform to world space.
             for (int i = 0; i + 3 < points.limit(); i += 4) {
-                float x = points.get(i);
-                float y = points.get(i + 1);
-                float z = points.get(i + 2);
+                cameraPoint[0] = points.get(i);
+                cameraPoint[1] = points.get(i + 1);
+                cameraPoint[2] = points.get(i + 2);
                 float confidence = points.get(i + 3);
-
-                if (!Float.isFinite(x) || !Float.isFinite(y) || !Float.isFinite(z)) continue;
-                if (confidence < 0.12f || z < -20f || z > 100f) continue;
-
-                if (scannerView.cloud().add(
-                        x, y, z,
-                        235, 245, 255,
-                        confidence)) {
-                    accepted++;
-                }
+                if (!Float.isFinite(cameraPoint[0]) || !Float.isFinite(cameraPoint[1]) || !Float.isFinite(cameraPoint[2])) continue;
+                if (confidence < 0.12f || cameraPoint[2] < -20f || cameraPoint[2] > 100f) continue;
+                pose.transformPoint(cameraPoint, 0, worldPoint, 0);
+                if (scannerView.cloud().add(worldPoint[0], worldPoint[1], worldPoint[2],
+                        235, 245, 255, confidence)) accepted++;
             }
         } catch (Exception ignored) {
         }
-
         return accepted;
     }
 
