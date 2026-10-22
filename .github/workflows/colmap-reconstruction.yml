@@ -50,6 +50,7 @@ jobs:
           python3 -m py_compile scripts/prepare_colmap_dataset.py scripts/write_reconstruction_report.py
 
   reconstruct:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
