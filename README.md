@@ -46,7 +46,40 @@ The ARCore Android SDK is packaged with the app, but Google Play Services for AR
 - [ ] On-device performance and quality validation on the target Redmi
 - [ ] Robust multi-view bundle adjustment and dense stereo fusion (PatchMatch/SGM)
 - [ ] Texture atlas generation and watertight mesh reconstruction
-- [ ] On-device offline COLMAP/OpenMVG/OpenMVS-class reconstruction runtime and job queue
+- [x] COLMAP sparse SfM processing workflow for exported calibrated scan datasets (GitHub Actions CPU runner)
+- [ ] On-device COLMAP runtime; native Android integration is not yet available
+- [ ] Reliable dense MVS/meshing on a CUDA-capable runner or a supported mobile backend
+
+
+## COLMAP reconstruction (real SfM backend)
+
+The repository now includes a separate **COLMAP-backed reconstruction workflow** at
+`.github/workflows/colmap-reconstruction.yml`. It runs the actual COLMAP command-line
+engine on a free GitHub-hosted Ubuntu runner against the calibrated images exported by
+the Android app. It is not a fake Java implementation or a renamed custom mesher.
+
+1. In the app, complete a scan and export the `*-photogrammetry-dataset.zip` file.
+2. Put that ZIP at a direct-download URL reachable by GitHub Actions (for example, a
+   temporary public GitHub Release asset; do not put private or sensitive scans on a
+   public host).
+3. Open **Actions → COLMAP reconstruction → Run workflow**, paste the direct URL, and
+   start the job.
+4. Download the `Redmi3DScanner-COLMAP-results` artifact when it finishes.
+
+The workflow prepares the image set using the saved camera intrinsics, runs COLMAP
+feature extraction, matching, incremental mapping and exports the sparse SfM model.
+The optional dense stage attempts COLMAP PatchMatch stereo, stereo fusion and Poisson
+meshing; it may not work on GitHub's ordinary CPU-only hosted runner because COLMAP's
+dense MVS backend commonly depends on CUDA. The workflow still preserves the sparse
+model and reports any dense-stage failure.
+
+**Important limitation:** this is a real COLMAP processing backend, but it is currently
+a **separate GitHub Actions job**, not an embedded on-device engine. The Redmi app
+does not yet launch COLMAP itself, and the free hosted runner requires the dataset to
+be made reachable by URL. A true offline Android build would require porting/building
+COLMAP and its C++ dependencies for Android ARM64/Bionic and solving the dense stereo
+backend without assuming NVIDIA CUDA; the upstream project documents a substantial
+native dependency stack and does not ship a ready-made Android runtime.
 
 ## Open-source foundations
 
