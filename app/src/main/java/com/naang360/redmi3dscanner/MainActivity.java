@@ -44,10 +44,12 @@ public class MainActivity extends AppCompatActivity {
     private SensorFusion fusion;
     private KeyframeRecorder keyframes;
     private FeatureReconstruction reconstruction;
+    private final DenseMesh denseMesh = new DenseMesh();
     private ScannerView scannerView;
     private TextView status, sensors, root;
     private Thread captureThread;
     private long lastImageCaptureMs;
+    private long lastDepthCaptureMs;
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -74,6 +76,7 @@ public class MainActivity extends AppCompatActivity {
             scan.setText(scanning ? "STOP SCAN" : "START SCAN");
             if (scanning) {
                 scannerView.cloud().clear();
+                denseMesh.clear();
                 keyframes.clear();
                 reconstruction.reset();
                 status.setText("Scanning… move slowly around the object");
@@ -92,8 +95,8 @@ public class MainActivity extends AppCompatActivity {
                     sessionReady = true;
                     session.resume();
                     status.setText(depthSupported
-                            ? "CAMERA LIVE • depth + tracking"
-                            : "CAMERA LIVE • visual tracking");
+                            ? "CAMERA LIVE • ARCore depth + tracking"
+                            : "CAMERA LIVE • visual tracking (no depth support)");
                     startCaptureThread();
                 }
             } catch (Exception e) {
@@ -119,10 +122,8 @@ public class MainActivity extends AppCompatActivity {
             session = new Session(this);
             Config config = session.getConfig();
 
-            depthSupported = session.isDepthModeSupported(Config.DepthMode.RAW_DEPTH_ONLY);
-            if (depthSupported) {
-                config.setDepthMode(Config.DepthMode.RAW_DEPTH_ONLY);
-            }
+            depthSupported = session.isDepthModeSupported(Config.DepthMode.AUTOMATIC);
+            if (depthSupported) config.setDepthMode(Config.DepthMode.AUTOMATIC);
 
             session.configure(config);
             status.setText("Initializing ARCore camera…");
@@ -184,7 +185,10 @@ public class MainActivity extends AppCompatActivity {
                                 reconstruction.process(frame, rgb, scannerView.cloud(), now);
                                 featureCount = Math.max(featureCount, reconstruction.getLastMatchCount());
                             }
-                            if (depthSupported) captureDepth(frame, rgb, pose);
+                            if (depthSupported && now - lastDepthCaptureMs >= 440) {
+                                lastDepthCaptureMs = now;
+                                captureDepth(frame, rgb, pose);
+                            }
                         } finally {
                             if (rgb != null) rgb.close();
                         }
@@ -244,63 +248,57 @@ public class MainActivity extends AppCompatActivity {
      * ARCore camera coordinates look down -Z; Pose transforms camera-local points to world.
      */
     private void captureDepth(Frame frame, Image rgb, Pose pose) {
-        try (Image depth = frame.acquireRawDepthImage16Bits()) {
+        try (Image depth = frame.acquireDepthImage16Bits()) {
             Image.Plane dp = depth.getPlanes()[0];
             java.nio.ByteBuffer db = dp.getBuffer().duplicate();
             int dw = depth.getWidth(), dh = depth.getHeight();
             int rw = rgb.getWidth(), rh = rgb.getHeight();
-
-            // Intrinsics are reported for the camera image size, which may differ from depth.
             com.google.ar.core.CameraIntrinsics intr = frame.getCamera().getImageIntrinsics();
-            float[] focal = intr.getFocalLength();
-            float[] principal = intr.getPrincipalPoint();
+            float[] focal = intr.getFocalLength(), principal = intr.getPrincipalPoint();
             int[] imageSize = intr.getImageDimensions();
-            float sx = dw / (float) Math.max(1, imageSize[0]);
-            float sy = dh / (float) Math.max(1, imageSize[1]);
-            float fx = focal[0] * sx, fy = focal[1] * sy;
-            float cx = principal[0] * sx, cy = principal[1] * sy;
-            if (!(fx > 0f && fy > 0f)) return;
+            float sx = dw / (float)Math.max(1, imageSize[0]);
+            float sy = dh / (float)Math.max(1, imageSize[1]);
+            float fx=focal[0]*sx, fy=focal[1]*sy, cx=principal[0]*sx, cy=principal[1]*sy;
+            if (!(fx>0f && fy>0f)) return;
 
-            Image.Plane[] rp = rgb.getPlanes();
-            Image.Plane yp = rp[0], up = rp[1], vp = rp[2];
-            java.nio.ByteBuffer yb = yp.getBuffer().duplicate();
-            java.nio.ByteBuffer ub = up.getBuffer().duplicate();
-            java.nio.ByteBuffer vb = vp.getBuffer().duplicate();
+            Image.Plane[] rp=rgb.getPlanes();
+            Image.Plane yp=rp[0], up=rp[1], vp=rp[2];
+            java.nio.ByteBuffer yb=yp.getBuffer().duplicate(), ub=up.getBuffer().duplicate(), vb=vp.getBuffer().duplicate();
+            int step=6, rows=(dh+step-1)/step, cols=(dw+step-1)/step;
+            int[][] grid=new int[rows][cols];
+            for(int[] row:grid) java.util.Arrays.fill(row,-1);
+            float[] cameraPoint=new float[3], worldPoint=new float[3];
+            int pixelStride=Math.max(1,dp.getPixelStride()), rowStride=dp.getRowStride();
 
-            float[] cameraPoint = new float[3];
-            float[] worldPoint = new float[3];
-            int pixelStride = Math.max(1, dp.getPixelStride());
-            int rowStride = dp.getRowStride();
-
-            // Sample every third depth pixel: denser than the old 4-pixel grid,
-            // while keeping CPU and memory use reasonable on the Snapdragon 660.
-            for (int y = 2; y < dh - 2; y += 3) {
-                int drow = y * rowStride;
-                for (int x = 2; x < dw - 2; x += 3) {
-                    int off = drow + x * pixelStride;
-                    if (off < 0 || off + 1 >= db.limit()) continue;
-
-                    int mm = (db.get(off) & 255) | ((db.get(off + 1) & 255) << 8);
-                    if (mm < 150 || mm > 6000) continue;
-
-                    float z = mm / 1000f;
-                    cameraPoint[0] = (x - cx) * z / fx;
-                    cameraPoint[1] = -(y - cy) * z / fy;
-                    cameraPoint[2] = -z;
-                    pose.transformPoint(cameraPoint, 0, worldPoint, 0);
-
-                    // Raw depth and CPU camera image can have different dimensions.
-                    int rx = Math.min(rw - 1, Math.max(0, x * rw / dw));
-                    int ry = Math.min(rh - 1, Math.max(0, y * rh / dh));
-                    int[] color = yuvAt(rx, ry, yp, up, vp, yb, ub, vb);
-
-                    float confidence = Math.max(0.05f, Math.min(1f, 1f - z / 7f));
-                    scannerView.cloud().add(worldPoint[0], worldPoint[1], worldPoint[2],
-                            color[0], color[1], color[2], 0f, 0f, 0f, confidence);
+            for(int y=2;y<dh-2;y+=step) {
+                int drow=y*rowStride;
+                for(int x=2;x<dw-2;x+=step) {
+                    int off=drow+x*pixelStride;
+                    if(off<0 || off+1>=db.limit()) continue;
+                    int mm=(db.get(off)&255)|((db.get(off+1)&255)<<8);
+                    if(mm<150 || mm>6000) continue;
+                    float z=mm/1000f;
+                    cameraPoint[0]=(x-cx)*z/fx;
+                    cameraPoint[1]=-(y-cy)*z/fy;
+                    cameraPoint[2]=-z;
+                    pose.transformPoint(cameraPoint,0,worldPoint,0);
+                    int rx=Math.min(rw-1,Math.max(0,x*rw/dw));
+                    int ry=Math.min(rh-1,Math.max(0,y*rh/dh));
+                    int[] color=yuvAt(rx,ry,yp,up,vp,yb,ub,vb);
+                    float confidence=Math.max(0.05f,Math.min(1f,1f-z/7f));
+                    scannerView.cloud().add(worldPoint[0],worldPoint[1],worldPoint[2],
+                            color[0],color[1],color[2],0f,0f,0f,confidence);
+                    grid[y/step][x/step]=denseMesh.addVertex(worldPoint[0],worldPoint[1],worldPoint[2],
+                            color[0],color[1],color[2]);
                 }
             }
-        } catch (Exception ignored) {
-            // Raw depth is optional and device/runtime-dependent. Never crash a scan for it.
+            for(int gy=0;gy<rows-1;gy++) for(int gx=0;gx<cols-1;gx++) {
+                int a=grid[gy][gx], b=grid[gy][gx+1], c=grid[gy+1][gx], d=grid[gy+1][gx+1];
+                if(a>=0 && b>=0 && c>=0) denseMesh.addTriangle(a,c,b,0.10f);
+                if(b>=0 && c>=0 && d>=0) denseMesh.addTriangle(b,c,d,0.10f);
+            }
+        } catch(Exception ignored) {
+            // ARCore depth is optional and device/runtime-dependent.
         }
     }
 
@@ -356,7 +354,8 @@ public class MainActivity extends AppCompatActivity {
             File csv = new File(dir, stamp + "-keyframes.csv");
 
             scannerView.cloud().writePly(ply);
-            scannerView.cloud().writeObj(obj);
+            if (denseMesh.faceCount() > 0) denseMesh.writeObj(obj);
+            else scannerView.cloud().writeObj(obj);
             keyframes.writeCsv(csv);
 
             Uri plyUri = publishDownload(ply, ply.getName(), "application/octet-stream");
@@ -369,7 +368,7 @@ public class MainActivity extends AppCompatActivity {
 
             if (plyUri != null && objUri != null && csvUri != null) {
                 Toast.makeText(this,
-                        "Saved PLY + OBJ model + keyframes to Download/Redmi3DScanner",
+                        "Saved PLY + OBJ mesh (" + denseMesh.faceCount() + " faces) + keyframes to Download/Redmi3DScanner",
                         Toast.LENGTH_LONG).show();
             } else {
                 Toast.makeText(this,
