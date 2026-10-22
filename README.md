@@ -22,7 +22,7 @@ The Android app bundles the ARCore SDK, OpenCV 4.10 ARM64 native libraries, and 
 
 - **ARCore automatic depth available:** camera tracking + metric depth samples are transformed into world space; adjacent depth-grid samples are triangulated into a colored OBJ surface.
 - **ARCore depth unavailable:** OpenCV DNN runs the bundled MiDaS-small model periodically and generates an approximate relative-depth surface. Its depth-to-metre scale is heuristic and is not suitable for measurement.
-- **Sparse feature reconstruction:** ORB descriptors are matched between camera frames and triangulated with tracked camera poses.
+- **Sparse feature reconstruction:** ORB descriptors use a ratio test, RANSAC epipolar-geometry filtering, and triangulation with tracked camera poses.
 - **Exports:** PLY point cloud, colored OBJ, vertex-colored GLB 2.0, binary STL, and keyframe CSV in `Download/Redmi3DScanner`. GLB keeps vertex colors; STL is geometry-only.
 
 This is a bundled, on-device **custom mobile reconstruction pipeline**, not yet a full COLMAP/OpenMVS-grade multi-view stereo implementation. It currently fuses ARCore depth or heuristic monocular depth; it does not yet run global bundle adjustment, PatchMatch multi-view stereo, a watertight surface solver, or texture-atlas baking. The OBJ mesh can contain holes, overlap, and geometric errors; the monocular fallback is less reliable than ARCore's metric depth.
