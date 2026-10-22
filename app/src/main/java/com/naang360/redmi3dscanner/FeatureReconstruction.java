@@ -21,7 +21,7 @@ import java.util.Set;
 public final class FeatureReconstruction {
     private static final int MAX_FEATURES = 180;
     private static final int PATCH_RADIUS = 3;
-    private static final int MIN_BASELINE_METERS = 0.025;
+    private static final float MIN_BASELINE_METERS = 0.025f;
     private static final int MIN_PARALLAX_PIXELS = 2;
 
     private static final class Feature {
