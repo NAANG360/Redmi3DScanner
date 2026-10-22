@@ -78,14 +78,24 @@ public final class ScanSessionArchive {
         Bitmap bitmap = null;
         try {
             int width=image.getWidth(), height=image.getHeight();
+            // Center-crop to 16:9 rather than stretching a 4:3 camera image.
+            float targetAspect=OUT_W/(float)OUT_H, sourceAspect=width/(float)height;
+            float cropWidth=width, cropHeight=height, cropLeft=0f, cropTop=0f;
+            if(sourceAspect>targetAspect) {
+                cropWidth=height*targetAspect;
+                cropLeft=(width-cropWidth)*0.5f;
+            } else {
+                cropHeight=width/targetAspect;
+                cropTop=(height-cropHeight)*0.5f;
+            }
             Image.Plane[] planes=image.getPlanes();
             Image.Plane yp=planes[0], up=planes[1], vp=planes[2];
             ByteBuffer yb=yp.getBuffer().duplicate(), ub=up.getBuffer().duplicate(), vb=vp.getBuffer().duplicate();
             int[] pixels=new int[OUT_W*OUT_H];
             for(int oy=0;oy<OUT_H;oy++) {
-                int y=Math.min(height-1,oy*height/OUT_H);
+                int y=Math.min(height-1,Math.max(0,(int)(cropTop+(oy+0.5f)*cropHeight/OUT_H)));
                 for(int ox=0;ox<OUT_W;ox++) {
-                    int x=Math.min(width-1,ox*width/OUT_W);
+                    int x=Math.min(width-1,Math.max(0,(int)(cropLeft+(ox+0.5f)*cropWidth/OUT_W)));
                     int yi=y*yp.getRowStride()+x*yp.getPixelStride();
                     int ui=(y/2)*up.getRowStride()+(x/2)*up.getPixelStride();
                     int vi=(y/2)*vp.getRowStride()+(x/2)*vp.getPixelStride();
@@ -104,11 +114,14 @@ public final class ScanSessionArchive {
             }
             float[] focal=intr.getFocalLength(), principal=intr.getPrincipalPoint();
             int[] dims=intr.getImageDimensions();
-            float sx=OUT_W/(float)Math.max(1,dims[0]), sy=OUT_H/(float)Math.max(1,dims[1]);
+            float imageSx=width/(float)Math.max(1,dims[0]), imageSy=height/(float)Math.max(1,dims[1]);
+            float sx=OUT_W/cropWidth, sy=OUT_H/cropHeight;
+            float fx=focal[0]*imageSx*sx, fy=focal[1]*imageSy*sy;
+            float cx=(principal[0]*imageSx-cropLeft)*sx, cy=(principal[1]*imageSy-cropTop)*sy;
             manifest.write(String.format(Locale.US,
                     "%s,%d,%.7f,%.7f,%.7f,%.7f,%.7f,%.7f,%.7f,%d,%d,%.5f,%.5f,%.5f,%.5f\n",
                     name,timestampMs,p[0],p[1],p[2],p[3],p[4],p[5],p[6],
-                    OUT_W,OUT_H,focal[0]*sx,focal[1]*sy,principal[0]*sx,principal[1]*sy));
+                    OUT_W,OUT_H,fx,fy,cx,cy));
             manifest.flush();
             frames++;
             lastTimestamp=timestampMs;
