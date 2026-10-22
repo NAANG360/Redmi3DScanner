@@ -1,6 +1,16 @@
 name: COLMAP reconstruction
 
 on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/colmap-reconstruction.yml'
+      - 'scripts/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/colmap-reconstruction.yml'
+      - 'scripts/**'
   workflow_dispatch:
     inputs:
       dataset_url:
@@ -21,6 +31,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify-colmap-engine:
+    if: ${{ github.event_name != 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install actual COLMAP engine
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y colmap python3
+          colmap -h
+          colmap feature_extractor -h >/dev/null
+          colmap exhaustive_matcher -h >/dev/null
+          colmap mapper -h >/dev/null
+          colmap model_converter -h >/dev/null
+          python3 -m py_compile scripts/prepare_colmap_dataset.py scripts/write_reconstruction_report.py
+
   reconstruct:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
