@@ -40,6 +40,7 @@ jobs:
             https://github.com/isl-org/MiDaS/releases/download/v2_1/model-small.onnx \\
             --output app/src/main/assets/midas_small.onnx
           test "$(stat -c%s app/src/main/assets/midas_small.onnx)" -gt 1000000
+          cp licenses/MIDAS-MIT-LICENSE.txt app/src/main/assets/midas_license.txt
 
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
