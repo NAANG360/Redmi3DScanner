@@ -347,22 +347,24 @@ public class MainActivity extends AppCompatActivity {
             String stamp = "scan-" + System.currentTimeMillis();
 
             File ply = new File(dir, stamp + ".ply");
+            File obj = new File(dir, stamp + ".obj");
             File csv = new File(dir, stamp + "-keyframes.csv");
 
             scannerView.cloud().writePly(ply);
+            scannerView.cloud().writeObj(obj);
             keyframes.writeCsv(csv);
 
-            Uri plyUri = publishDownload(
-                    ply, ply.getName(), "application/octet-stream");
-            Uri csvUri = publishDownload(
-                    csv, csv.getName(), "text/csv");
+            Uri plyUri = publishDownload(ply, ply.getName(), "application/octet-stream");
+            Uri objUri = publishDownload(obj, obj.getName(), "text/plain");
+            Uri csvUri = publishDownload(csv, csv.getName(), "text/csv");
 
             ply.delete();
+            obj.delete();
             csv.delete();
 
-            if (plyUri != null && csvUri != null) {
+            if (plyUri != null && objUri != null && csvUri != null) {
                 Toast.makeText(this,
-                        "Saved to Download/Redmi3DScanner",
+                        "Saved PLY + OBJ model + keyframes to Download/Redmi3DScanner",
                         Toast.LENGTH_LONG).show();
             } else {
                 Toast.makeText(this,
